@@ -1,37 +1,14 @@
 services:
-  chisel:
+  chisel-server:
     image: jpillora/chisel:latest
     container_name: chisel-server
     restart: unless-stopped
-    command:
-      - server
-      - --reverse
-      - --auth
-      - ${CHISEL_USER}:${CHISEL_PASSWORD}
-      - --port
-      - "4016"
+    command: >
+      server
+      --reverse
+      --auth ${CHISEL_AUTH}
+      --port 4016
     ports:
-      # 4016: служебный порт chisel, к нему подключается локальный клиент
       - "4016:4016"
-      # 4014: публичный WebSocket-порт, уходит через туннель на локальный 8765
-      - "4014:4014"
-    networks:
-      - proxy-net
-
-  nginx:
-    image: nginx:alpine
-    container_name: nginx-public
-    restart: unless-stopped
-    depends_on:
-      - chisel
-    ports:
-      # 4015: публичный HTTP-порт веб-приложения
       - "4015:4015"
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-    networks:
-      - proxy-net
-
-networks:
-  proxy-net:
-    name: reverse-proxy-net
+      - "4014:4014"

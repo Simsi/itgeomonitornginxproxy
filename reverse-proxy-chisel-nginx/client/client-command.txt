@@ -1,9 +1,8 @@
-# Запускать на локальном ПК.
-# Локальные порты НЕ меняются: приложение на 127.0.0.1:8050, WebSocket на 127.0.0.1:8765.
-# Замените SERVER_PUBLIC_IP, CHISEL_USER и CHISEL_PASSWORD.
+# Equivalent chisel command if rewrite-proxy is already running locally on 127.0.0.1:18050:
 
-chisel client \
-  --auth CHISEL_USER:CHISEL_PASSWORD \
-  SERVER_PUBLIC_IP:4016 \
-  R:0.0.0.0:18050:127.0.0.1:8050 \
+docker run --rm --network host jpillora/chisel:latest \
+  client \
+  --auth "user:STRONG_PASSWORD" \
+  "84.237.52.214:4016" \
+  R:0.0.0.0:4015:127.0.0.1:18050 \
   R:0.0.0.0:4014:127.0.0.1:8765

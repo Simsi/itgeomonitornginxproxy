@@ -1,26 +1,50 @@
-# Reverse proxy: nginx + chisel
+# Reverse proxy через Chisel с ограничением портов 4014–4016
 
-Схема использует только публичные порты сервера `4014`, `4015`, `4016`.
+Назначение проекта:
 
-- `4015` — внешний HTTP-порт веб-приложения.
-- `4014` — внешний WebSocket-порт.
-- `4016` — служебный порт `chisel`, к нему подключается локальный ПК.
+- `84.237.52.214:4015` — внешний HTTP-доступ к локальному веб-приложению `127.0.0.1:8050`.
+- `84.237.52.214:4014` — внешний WebSocket-доступ к локальному WebSocket-серверу `127.0.0.1:8765`.
+- `84.237.52.214:4016` — служебный порт Chisel для reverse tunnel.
 
-На локальном ПК порты не меняются:
+На сервере используются только порты `4014`, `4015`, `4016`.
 
-- локальное веб-приложение: `127.0.0.1:8050`
-- локальный WebSocket: `127.0.0.1:8765`
+`18050` используется только на локальном ПК внутри client-side схемы. На сервере этот порт не слушается и не публикуется.
 
-Итоговая маршрутизация:
+## Архитектура
 
 ```text
-http://SERVER_PUBLIC_IP:4015  -> nginx -> chisel -> 127.0.0.1:8050 на локальном ПК
-ws://SERVER_PUBLIC_IP:4014    -> chisel          -> 127.0.0.1:8765 на локальном ПК
+Браузер
+  |
+  | HTTP http://84.237.52.214:4015
+  v
+Сервер:4015
+  |
+  | chisel reverse tunnel
+  v
+Локальный ПК:127.0.0.1:18050
+  |
+  | rewrite-proxy container
+  v
+Локальный ПК:127.0.0.1:8050
 ```
 
-Nginx также переписывает в HTML/JS строку `:8765` на `:4014`, чтобы браузер не пытался идти на закрытый порт `8765` белого сервера.
+```text
+Браузер
+  |
+  | WebSocket ws://84.237.52.214:4014
+  v
+Сервер:4014
+  |
+  | chisel reverse tunnel
+  v
+Локальный ПК:127.0.0.1:8765
+```
+
+Rewrite proxy нужен, чтобы в отдаваемом HTML/JS заменить обращения к `:8765` на `:4014`. Это позволяет не менять исходный код веб-приложения.
 
 ## 1. Запуск на сервере
+
+Перейдите в папку `server`:
 
 ```bash
 cd server
@@ -28,14 +52,13 @@ cp .env.example .env
 nano .env
 ```
 
-Задайте пароль:
+Укажите пароль в `.env`:
 
 ```env
-CHISEL_USER=user
-CHISEL_PASSWORD=your_strong_password
+CHISEL_AUTH=user:STRONG_PASSWORD
 ```
 
-Запуск:
+Запустите:
 
 ```bash
 ./start-server.sh
@@ -47,117 +70,101 @@ CHISEL_PASSWORD=your_strong_password
 docker compose up -d
 ```
 
-Проверка контейнеров:
+Проверка:
 
 ```bash
-docker compose ps
+docker ps
+ss -lntp | grep -E ':(4014|4015|4016)'
 ```
 
-Остановка:
+## 2. Запуск на локальном ПК
+
+На локальном ПК должны уже работать:
+
+```text
+127.0.0.1:8050 — веб-приложение
+127.0.0.1:8765 — WebSocket
+```
+
+Перейдите в папку `client`:
 
 ```bash
-./stop-server.sh
+cd client
+cp .env.example .env
+nano .env
 ```
 
-## 2. Запуск клиента на локальном ПК
+Укажите настройки:
 
-Сначала проверьте, что локально работают оба сервиса:
+```env
+SERVER_HOST=84.237.52.214
+CHISEL_AUTH=user:STRONG_PASSWORD
+LOCAL_HTTP_TARGET_HOST=127.0.0.1
+LOCAL_HTTP_TARGET_PORT=8050
+LOCAL_WS_TARGET_HOST=127.0.0.1
+LOCAL_WS_TARGET_PORT=8765
+LOCAL_REWRITE_PROXY_PORT=18050
+PUBLIC_WS_PORT=4014
+OLD_WS_PORT=8765
+```
+
+Запустите:
 
 ```bash
-curl http://127.0.0.1:8050
+./start-client.sh
 ```
 
-WebSocket должен слушать на `127.0.0.1:8765`.
-
-### Вариант A: chisel установлен локально
+Или напрямую:
 
 ```bash
-export SERVER_PUBLIC_IP=84.237.52.214
-export CHISEL_USER=user
-export CHISEL_PASSWORD=your_strong_password
-./client/run-client.sh
+docker compose up -d --build
 ```
 
-Эквивалентная команда без скрипта:
+## 3. Проверка
+
+С любой машины, где доступен белый сервер:
 
 ```bash
-chisel client \
-  --auth user:your_strong_password \
-  84.237.52.214:4016 \
-  R:0.0.0.0:18050:127.0.0.1:8050 \
-  R:0.0.0.0:4014:127.0.0.1:8765
+curl -v http://84.237.52.214:4015/
 ```
 
-### Вариант B: клиент через Docker на Linux
-
-```bash
-export SERVER_PUBLIC_IP=84.237.52.214
-export CHISEL_USER=user
-export CHISEL_PASSWORD=your_strong_password
-./client/run-client-docker-linux.sh
-```
-
-### Вариант C: клиент через Docker Desktop на macOS/Windows
-
-```bash
-export SERVER_PUBLIC_IP=84.237.52.214
-export CHISEL_USER=user
-export CHISEL_PASSWORD=your_strong_password
-./client/run-client-docker-desktop.sh
-```
-
-## 3. Как открывать приложение
-
-В браузере открывайте:
+В браузере откройте:
 
 ```text
 http://84.237.52.214:4015
 ```
 
-Фронтенд должен начать ходить на:
+В DevTools WebSocket должен идти на:
 
 ```text
 ws://84.237.52.214:4014/
 ```
 
-А не на:
+а не на:
 
 ```text
 ws://84.237.52.214:8765/
 ```
 
-## 4. Диагностика
+## 4. Остановка
 
-Логи nginx:
-
-```bash
-cd server
-docker compose logs -f nginx
-```
-
-Логи chisel-сервера:
+На сервере:
 
 ```bash
 cd server
-docker compose logs -f chisel
+./stop-server.sh
 ```
 
-Проверить, что сервер слушает нужные порты:
+На локальном ПК:
 
 ```bash
-ss -lntp | grep -E '4014|4015|4016'
+cd client
+./stop-client.sh
 ```
 
-Проверить HTTP с внешней машины:
+## 5. Важные замечания
 
-```bash
-curl -v http://84.237.52.214:4015
-```
-
-Проверить, что nginx реально переписывает порт в отдаваемых файлах:
-
-```bash
-curl -s http://84.237.52.214:4015 | grep -E '8765|4014'
-```
-
-Если в браузере всё ещё видно `ws://84.237.52.214:8765/`, значит порт `8765` формируется не простым текстом в HTML/JS или файл пришёл из кэша браузера. Сначала сделайте hard refresh / очистку кэша. Если не помогло, нужно точечно посмотреть файл `websocket-client.js` и добавить более конкретную подмену в `server/nginx/default.conf`.
+1. На сервере не используется порт `18050`. Сервер слушает только `4014`, `4015`, `4016`.
+2. Контейнеры клиента используют `network_mode: host`. Это самый простой вариант для Linux, потому что контейнеры видят локальные сервисы на `127.0.0.1:8050` и `127.0.0.1:8765`.
+3. Если локальный ПК — Docker Desktop на macOS/Windows, `network_mode: host` может работать иначе. В таком случае лучше запускать chisel и rewrite-proxy напрямую на хосте либо заменить `127.0.0.1` на `host.docker.internal` в `.env`, если это работает в вашей среде.
+4. Если WebSocket-адрес формируется не как строка с `:8765`, а каким-то нестандартным способом, может потребоваться точечная правка `rewrite-proxy/rewrite_proxy.py`.

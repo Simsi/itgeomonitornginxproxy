@@ -1,0 +1,30 @@
+services:
+  rewrite-proxy:
+    build:
+      context: ./rewrite-proxy
+    container_name: local-rewrite-proxy
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      LISTEN_HOST: ${LOCAL_REWRITE_PROXY_HOST}
+      LISTEN_PORT: ${LOCAL_REWRITE_PROXY_PORT}
+      TARGET_HOST: ${LOCAL_HTTP_TARGET_HOST}
+      TARGET_PORT: ${LOCAL_HTTP_TARGET_PORT}
+      OLD_WS_PORT: ${OLD_WS_PORT}
+      NEW_WS_PORT: ${PUBLIC_WS_PORT}
+      PUBLIC_HOST: ${SERVER_HOST}
+      PUBLIC_HTTP_PORT: ${PUBLIC_HTTP_PORT}
+
+  chisel-client:
+    image: jpillora/chisel:latest
+    container_name: chisel-client
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - rewrite-proxy
+    command: >
+      client
+      --auth ${CHISEL_AUTH}
+      ${SERVER_HOST}:4016
+      R:0.0.0.0:${PUBLIC_HTTP_PORT}:${LOCAL_REWRITE_PROXY_HOST}:${LOCAL_REWRITE_PROXY_PORT}
+      R:0.0.0.0:${PUBLIC_WS_PORT}:${LOCAL_WS_TARGET_HOST}:${LOCAL_WS_TARGET_PORT}
